@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - "master"
+  pull_request:
+    branches:
+      - "master"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: build-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      REGISTRY: ghcr.io
+      REGISTRY_USER: ${{ github.actor }}
+      REGISTRY_PASS: ${{ secrets.GITHUB_TOKEN }}
+      REPO: jdobes/unifi-duckdns-ipv6
+      PLATFORM: linux/amd64,linux/arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install qemu-user-binfmt-hwe for multi-arch build
+        run: |
+          sudo apt update && sudo apt install -y qemu-user-binfmt-hwe
+      - name: Create tag
+        run: |
+          echo "TAG=$(date '+%Y%m%d')" >> $GITHUB_ENV
+      - name: Build latest version
+        run: |
+          podman build --platform="$PLATFORM" --squash --manifest=unifi-duckdns-ipv6 .
+      - name: Login to registry and push built image
+        if: github.event_name == 'push'
+        run: |
+          echo "$REGISTRY_PASS" | podman login -u "$REGISTRY_USER" --password-stdin "$REGISTRY"
+          podman manifest push unifi-duckdns-ipv6 docker://$REGISTRY/$REPO:$TAG
+          podman manifest push unifi-duckdns-ipv6 docker://$REGISTRY/$REPO:latest
+      - name: Delete old images
+        if: github.event_name == 'push'
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1
+        with:
+          packages: unifi-duckdns-ipv6
+          keep-n-tagged: 5
+          delete-untagged: true
+      - name: Cleanup
+        run: |
+          podman manifest rm unifi-duckdns-ipv6
